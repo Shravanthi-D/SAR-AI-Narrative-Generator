@@ -1,0 +1,23 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: sardb
+      POSTGRES_USER: saruser
+      POSTGRES_PASSWORD: localpassword123
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin@123456!
+    ports:
+      - "9200:9200"
+
+volumes:
+  pgdata:
