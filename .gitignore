@@ -5,3 +5,4 @@ venv/
 .venv/
 rag_docs/*.pdf
 *.egg-info/
+.claude/
