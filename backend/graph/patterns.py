@@ -7,6 +7,7 @@ STRUCTURING_LOW  = REPORTING_THRESHOLD * 0.80   # 8,000
 STRUCTURING_HIGH = REPORTING_THRESHOLD * 0.999  # 9,990
 
 
+
 def detect_structuring(
     G: nx.MultiDiGraph,
     account_token: str,

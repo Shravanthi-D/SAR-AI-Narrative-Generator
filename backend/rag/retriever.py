@@ -31,6 +31,7 @@ def retrieve_regulations(query: str, client: OpenSearch, top_k: int = 5) -> list
         "_source": ["chunk_id", "source", "text"],
     }
 
+    client.indices.refresh(index=INDEX_NAME)
     response = client.search(index=INDEX_NAME, body=search_body)
 
     results = []

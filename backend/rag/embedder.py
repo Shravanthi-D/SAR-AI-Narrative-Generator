@@ -14,12 +14,15 @@ def get_opensearch_client() -> OpenSearch:
     """Create and return an OpenSearch client for localhost:9200."""
     return OpenSearch(
         hosts=[{"host": "localhost", "port": 9200}],
-        http_auth=("admin", "Admin@123456!"),
+        http_auth=(os.environ.get("OPENSEARCH_USER", "admin"), os.environ.get("OPENSEARCH_PASS", "admin")),
         use_ssl=True,
         verify_certs=False,
         ssl_assert_hostname=False,
         ssl_assert_fingerprint=False,
         connection_class=RequestsHttpConnection,
+        timeout=60,
+        max_retries=3,
+        retry_on_timeout=True,
     )
 
 
