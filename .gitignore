@@ -1,3 +1,4 @@
+source venv/bin/activate
 .env
 __pycache__/
 *.pyc
