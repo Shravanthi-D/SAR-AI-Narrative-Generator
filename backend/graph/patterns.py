@@ -1,6 +1,7 @@
 from datetime import timedelta
 from typing import Optional
 import networkx as nx
+from dateutil.parser import parse as parse_dt
 
 REPORTING_THRESHOLD = 10_000.00
 STRUCTURING_LOW  = REPORTING_THRESHOLD * 0.80   # 8,000
@@ -33,6 +34,10 @@ def detect_structuring(
 
     if len(deposits) < 3:
         return None
+
+    for d in deposits:
+        if isinstance(d["timestamp"], str):
+            d["timestamp"] = parse_dt(d["timestamp"])
 
     # Sort by timestamp
     deposits.sort(key=lambda x: x["timestamp"])

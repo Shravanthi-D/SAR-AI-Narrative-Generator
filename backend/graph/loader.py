@@ -1,4 +1,5 @@
 import networkx as nx
+from dateutil.parser import parse as parse_dt
 
 
 def build_transaction_graph(transactions: list) -> nx.MultiDiGraph:
@@ -19,6 +20,8 @@ def build_transaction_graph(transactions: list) -> nx.MultiDiGraph:
         txn_id = txn.get("txn_id")
         amount = float(txn.get("amount", 0))
         timestamp = txn.get("txn_timestamp")
+        if isinstance(timestamp, str):
+            timestamp = parse_dt(timestamp)
 
         edge_attrs = {
             "txn_id":    txn_id,
