@@ -1,0 +1,182 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 16px;
+  
+  /* Banking Enterprise Colors */
+  --deep-navy: #0B1F3A;
+  --midnight-blue: #102A43;
+  --royal-blue: #1F4ED8;
+  --steel-blue: #486581;
+  --emerald-green: #10B981;
+  --amber: #F59E0B;
+  --crimson-red: #DC2626;
+  --blockchain-purple: #7C3AED;
+  --light-gray: #E5E7EB;
+  
+  --background: #0B1F3A;
+  --foreground: #E5E7EB;
+  --card: #102A43;
+  --card-foreground: #E5E7EB;
+  --popover: #102A43;
+  --popover-foreground: #E5E7EB;
+  --primary: #1F4ED8;
+  --primary-foreground: #FFFFFF;
+  --secondary: #486581;
+  --secondary-foreground: #E5E7EB;
+  --muted: #9CA3AF;
+  --muted-foreground: #9CA3AF;
+  --accent: #1F4ED8;
+  --accent-foreground: #FFFFFF;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --border: #1F3A5F;
+  --input: #1F3A5F;
+  --input-background: #0B1F3A;
+  --switch-background: #486581;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: #1F4ED8;
+  --chart-1: #1F4ED8;
+  --chart-2: #10B981;
+  --chart-3: #F59E0B;
+  --chart-4: #DC2626;
+  --chart-5: #7C3AED;
+  --radius: 0.125rem;
+  --sidebar: #102A43;
+  --sidebar-foreground: #E5E7EB;
+  --sidebar-primary: #1F4ED8;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #0B1F3A;
+  --sidebar-accent-foreground: #E5E7EB;
+  --sidebar-border: #1F3A5F;
+  --sidebar-ring: #1F4ED8;
+}
+
+.dark {
+  --background: #0B1F3A;
+  --foreground: #E5E7EB;
+  --card: #102A43;
+  --card-foreground: #E5E7EB;
+  --popover: #102A43;
+  --popover-foreground: #E5E7EB;
+  --primary: #1F4ED8;
+  --primary-foreground: #FFFFFF;
+  --secondary: #486581;
+  --secondary-foreground: #E5E7EB;
+  --muted: #9CA3AF;
+  --muted-foreground: #9CA3AF;
+  --accent: #1F4ED8;
+  --accent-foreground: #FFFFFF;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --border: #1F3A5F;
+  --input: #1F3A5F;
+  --ring: #1F4ED8;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: #1F4ED8;
+  --chart-2: #10B981;
+  --chart-3: #F59E0B;
+  --chart-4: #DC2626;
+  --chart-5: #7C3AED;
+  --sidebar: #102A43;
+  --sidebar-foreground: #E5E7EB;
+  --sidebar-primary: #1F4ED8;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #0B1F3A;
+  --sidebar-accent-foreground: #E5E7EB;
+  --sidebar-border: #1F3A5F;
+  --sidebar-ring: #1F4ED8;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'IBM Plex Sans', 'Inter', -apple-system, system-ui, sans-serif;
+  }
+
+  html {
+    font-size: var(--font-size);
+  }
+
+  h1 {
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h2 {
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h3 {
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h4 {
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  label {
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  button {
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  input {
+    font-weight: var(--font-weight-normal);
+    line-height: 1.5;
+  }
+}

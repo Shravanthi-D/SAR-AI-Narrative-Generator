@@ -1,7 +1,9 @@
 import json
 import os
+import time
 import boto3
 from opensearchpy import OpenSearch, RequestsHttpConnection
+from opensearchpy.exceptions import ConnectionError as OSConnectionError
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
@@ -11,7 +13,7 @@ INDEX_NAME = "regulations"
 
 
 def get_opensearch_client() -> OpenSearch:
-    """Create and return an OpenSearch client for localhost:9200."""
+    """Create and return an OpenSearch client for localhost:9200 (HTTP, no SSL)."""
     return OpenSearch(
         hosts=[{"host": "localhost", "port": 9200}],
         http_auth=(os.environ.get("OPENSEARCH_USER", "admin"), os.environ.get("OPENSEARCH_PASS", "admin")),
@@ -19,10 +21,29 @@ def get_opensearch_client() -> OpenSearch:
         verify_certs=False,
         ssl_assert_hostname=False,
         ssl_assert_fingerprint=False,
+        http_compress=True,
         connection_class=RequestsHttpConnection,
         timeout=60,
         max_retries=3,
         retry_on_timeout=True,
+    )
+
+
+def wait_for_opensearch(client: OpenSearch, timeout: int = 30) -> None:
+    """Retry pinging OpenSearch every second until ready or timeout."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if client.ping():
+                print("OpenSearch is ready.")
+                return
+        except (OSConnectionError, Exception):
+            pass
+        print("Waiting for OpenSearch...")
+        time.sleep(1)
+    raise TimeoutError(
+        f"OpenSearch did not become ready within {timeout} seconds. "
+        "Check that the Docker container is running on localhost:9200."
     )
 
 
@@ -116,6 +137,7 @@ def index_all_chunks(chunks_json_path: str, client: OpenSearch):
 
 if __name__ == "__main__":
     os_client = get_opensearch_client()
+    wait_for_opensearch(os_client)
     setup_opensearch_index(os_client)
     index_all_chunks(
         os.path.join(RAG_DOCS_DIR, "chunks.json"),

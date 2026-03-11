@@ -7,3 +7,4 @@ venv/
 rag_docs/*.pdf
 *.egg-info/
 .claude/
+node_modules/
