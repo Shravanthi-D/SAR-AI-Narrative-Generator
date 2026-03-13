@@ -1,127 +1,122 @@
-import json
+"""
+Agent 3 — Narrative Composer
+
+Receives investigator findings and regulatory citations, then drafts the five
+sections of the SAR narrative.  Every sentence that references a transaction
+must end with [TXN_REF: txn_id] and every sentence citing a regulation must
+end with [REG: source_name].
+
+Input:
+    investigation (dict): output from Agent 1
+    regulations   (dict): output from Agent 2
+    account_token (str):  masked account identifier
+
+Output dict keys:
+    section_1_subject          — subject identification paragraph
+    section_2_activity         — description of the activity observed
+    section_3_why_suspicious   — explanation of why the activity is suspicious
+    section_4_regulatory_basis — applicable regulations and reporting obligations
+    section_5_evidence         — supporting evidence and transaction references
+    compliance_warnings        — list of flagged language issues (omitted if empty)
+    model                      — model identifier used
+"""
+
 import os
 import re
-
+import json
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 from backend.agents.bedrock_client import call_llama
 
-SYSTEM_PROMPT = (
-    "You are a SAR (Suspicious Activity Report) narrative writer for a bank compliance team. "
-    "Rules you must follow without exception:\n"
-    "1. Never use speculative language — do not write 'probably', 'might be', 'likely', or 'suspected to be'.\n"
-    "2. Never use accusatory language — do not write 'guilty', 'criminal', 'illegal activity', or 'laundering'.\n"
-    "3. Every factual claim about a transaction must end with a citation tag [TXN_REF: txn_id].\n"
-    "4. Every regulatory reference must end with a citation tag [REG: source_name].\n"
-    "5. Describe only observed facts — what happened, when, and how much.\n"
-    "6. Return JSON only — no commentary, no markdown fences."
+
+_COMPLIANCE_DEFINITIVE = re.compile(
+    r'\b(guilty|criminal|illegal activity|laundering)\b', re.IGNORECASE
+)
+_COMPLIANCE_HEDGE = re.compile(
+    r'\b(probably|might be|likely|suspected to be)\b', re.IGNORECASE
 )
 
-_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```")
-
-_COMPLIANCE_RULES = [
-    (
-        re.compile(r"\b(guilty|criminal|illegal activity|laundering)\b", re.IGNORECASE),
-        "Accusatory language — use 'activity consistent with...' instead",
-    ),
-    (
-        re.compile(r"\b(probably|might be|likely|suspected to be)\b", re.IGNORECASE),
-        "Speculative language — describe only observed facts",
-    ),
-]
+_SYSTEM_PROMPT = (
+    "You are a SAR narrative writer for a bank compliance department. "
+    "Draft all five SAR narrative sections based on the investigation and regulations provided. "
+    "Tag each sentence referencing a transaction with [TXN_REF: txn_id] and each sentence "
+    "citing a regulation with [REG: source_name]. "
+    "Return ONLY valid JSON with exactly these keys: "
+    "section_1_subject, section_2_activity, section_3_why_suspicious, "
+    "section_4_regulatory_basis, section_5_evidence."
+)
 
 
 def compliance_guard(text: str) -> list:
-    violations = []
-    for pattern, message in _COMPLIANCE_RULES:
-        matches = pattern.findall(text)
-        if matches:
-            violations.append({"message": message, "matched_terms": list(set(m.lower() for m in matches))})
-    return violations
+    """
+    Scans text for language that is inappropriate in SAR narratives.
 
+    Flags:
+        - Definitive guilt language: guilty, criminal, illegal activity, laundering
+        - Imprecise hedging: probably, might be, likely, suspected to be
 
-def _parse_llm_json(raw: str) -> dict:
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
-
-    match = _FENCE_RE.search(raw)
-    if match:
-        return json.loads(match.group(1))
-
-    raise json.JSONDecodeError("No valid JSON found in LLM response", raw, 0)
-
-
-def _build_user_prompt(
-    investigation: dict,
-    applicable_regulations: list,
-    account_token: str,
-) -> str:
-    patterns = investigation.get("patterns_detected", [])
-    primary_concern = investigation.get("primary_concern", "")
-    evidence_summary = investigation.get("evidence_summary", "")
-    total_amount = investigation.get("total_suspicious_amount", 0)
-    time_period = investigation.get("time_period", "unknown")
-    transaction_ids = investigation.get("transaction_ids", [])
-
-    reg_lines = []
-    for reg in applicable_regulations:
-        reg_lines.append(
-            f"  - {reg.get('source','')}: {reg.get('summary','')}"
+    Returns:
+        list of warning strings, empty if no issues found.
+    """
+    warnings = []
+    for match in _COMPLIANCE_DEFINITIVE.finditer(text):
+        warnings.append(
+            f"Definitive guilt language: '{match.group()}' at char {match.start()}"
         )
-    regs_text = "\n".join(reg_lines) if reg_lines else "  (none provided)"
+    for match in _COMPLIANCE_HEDGE.finditer(text):
+        warnings.append(
+            f"Imprecise hedging language: '{match.group()}' at char {match.start()}"
+        )
+    return warnings
 
-    txn_ids_text = ", ".join(transaction_ids) if transaction_ids else "(none)"
 
-    return (
-        f"Account token: {account_token}\n"
-        f"Detected patterns: {', '.join(patterns)}\n"
-        f"Primary concern: {primary_concern}\n"
-        f"Evidence summary: {evidence_summary}\n"
-        f"Total suspicious amount: ${total_amount:,.2f}\n"
-        f"Time period: {time_period}\n"
-        f"Transaction IDs: {txn_ids_text}\n\n"
-        f"Applicable regulations:\n{regs_text}\n\n"
-        "Write a SAR narrative as a JSON object with exactly these five keys. "
-        "Every sentence that states a fact about a transaction must end with [TXN_REF: txn_id]. "
-        "Every sentence that references a regulation must end with [REG: source_name].\n\n"
-        "  section_1_subject        — 1-2 sentences identifying the account and reporting period\n"
-        "  section_2_activity       — 3-5 sentences describing the observed transactions factually\n"
-        "  section_3_why_suspicious — 2-3 sentences explaining why the activity is consistent with "
-        "a reportable pattern, citing transactions\n"
-        "  section_4_regulatory_basis — 1-2 sentences citing the regulations that require this filing\n"
-        "  section_5_evidence       — bullet-point style string listing each key transaction ID and amount\n\n"
-        "Respond with the JSON object only."
-    )
+def _strip_markdown_fences(text: str) -> str:
+    text = re.sub(r'^```(?:json)?\s*', '', text.strip())
+    text = re.sub(r'\s*```$', '', text)
+    return text.strip()
 
 
 def run_composer(investigation: dict, regulations: dict, account_token: str) -> dict:
-    applicable_regulations = regulations.get("applicable_regulations", [])
-    user_prompt = _build_user_prompt(investigation, applicable_regulations, account_token)
-
-    raw = call_llama(
-        user_prompt,
-        system_prompt=SYSTEM_PROMPT,
-        max_tokens=3000,
-        temperature=0.1,
+    user_message = (
+        f"Account: {account_token}\n\n"
+        f"Investigation:\n{json.dumps(investigation, indent=2, default=str)}\n\n"
+        f"Regulations:\n{json.dumps(regulations, indent=2, default=str)}"
     )
-    result = _parse_llm_json(raw)
 
-    all_text = " ".join(
-        str(result.get(key, ""))
-        for key in [
-            "section_1_subject",
-            "section_2_activity",
-            "section_3_why_suspicious",
-            "section_4_regulatory_basis",
-            "section_5_evidence",
+    try:
+        raw = call_llama(user_message, _SYSTEM_PROMPT, max_tokens=2048)
+        result = json.loads(_strip_markdown_fences(raw))
+    except json.JSONDecodeError:
+        concern = (investigation or {}).get("primary_concern", "suspicious activity")
+        summary = (investigation or {}).get("evidence_summary", "")
+        txn_ids = (investigation or {}).get("transaction_ids", [])
+        regs = [
+            r.get("source", "")
+            for r in (regulations or {}).get("applicable_regulations", [])
         ]
-    )
+        result = {
+            "section_1_subject": (
+                f"The subject account {account_token} is reported for {concern}."
+            ),
+            "section_2_activity": summary,
+            "section_3_why_suspicious": (
+                f"The transaction pattern matches known {concern} typologies. "
+                + " ".join(f"[TXN_REF: {tid}]" for tid in txn_ids)
+            ),
+            "section_4_regulatory_basis": " ".join(
+                f"This activity falls under [REG: {r}]." for r in regs
+            ),
+            "section_5_evidence": (
+                f"Graph analysis detected {len(txn_ids)} suspicious transactions."
+            ),
+        }
+
+    all_text = " ".join(str(v) for v in result.values() if isinstance(v, str))
     warnings = compliance_guard(all_text)
     if warnings:
         result["compliance_warnings"] = warnings
 
+    result.setdefault("model", os.environ.get("BEDROCK_MODEL_ID", "unknown"))
     return result

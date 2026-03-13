@@ -1,14 +1,38 @@
-import json
+"""
+RAG ingestion pipeline — extracts text from PDFs in rag_docs/, splits into
+overlapping chunks, and writes them to rag_docs/chunks.json.
+
+Run this once before running embedder.py.
+
+Usage:
+    python3 -m backend.rag.ingest
+"""
+
 import os
-import glob
+import re
+import json
+from pathlib import Path
+from dotenv import load_dotenv
 import pdfplumber
 
-RAG_DOCS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "rag_docs")
-CHUNKS_OUTPUT = os.path.join(RAG_DOCS_DIR, "chunks.json")
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+
+_RAG_DOCS_DIR = Path(__file__).resolve().parents[2] / "rag_docs"
+_CHUNKS_PATH = _RAG_DOCS_DIR / "chunks.json"
+_CHUNK_SIZE = 500
+_OVERLAP = 100
 
 
-def extract_pdf_text(pdf_path: str) -> str:
-    """Extract all text from a PDF file, combining all pages into one string."""
+def _source_name(pdf_path: Path) -> str:
+    name = pdf_path.stem.lower()
+    if "fatf" in name:
+        return "FATF Recommendation 29"
+    if "pmla" in name:
+        return "PMLA Section 12"
+    return pdf_path.stem
+
+
+def extract_text(pdf_path: Path) -> str:
     pages = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -18,59 +42,38 @@ def extract_pdf_text(pdf_path: str) -> str:
     return "\n".join(pages)
 
 
-def chunk_text(text: str, source_name: str, chunk_size: int = 512, overlap: int = 64) -> list:
-    """
-    Split text into overlapping chunks of chunk_size words with overlap words
-    of overlap between consecutive chunks. Each chunk is a dict with:
-      chunk_id, source, text, word_count
-    """
+def chunk_text(text: str, chunk_size: int = _CHUNK_SIZE, overlap: int = _OVERLAP) -> list:
     words = text.split()
     chunks = []
     start = 0
-    idx = 0
-
     while start < len(words):
-        end = start + chunk_size
-        chunk_words = words[start:end]
-        chunk_text_str = " ".join(chunk_words)
+        end = min(start + chunk_size, len(words))
+        chunks.append(" ".join(words[start:end]))
+        start += chunk_size - overlap
+    return chunks
 
-        # Derive a short slug from the source name for the chunk_id prefix
-        slug = "".join(c if c.isalnum() else "_" for c in source_name.lower())[:12].strip("_")
-        chunk_id = f"{slug}_{idx:04d}"
 
-        chunks.append({
-            "chunk_id":   chunk_id,
-            "source":     source_name,
-            "text":       chunk_text_str,
-            "word_count": len(chunk_words),
-        })
-
-        idx += 1
-        start += chunk_size - overlap  # slide forward, keeping overlap words
-
+def build_chunks(rag_docs_dir: Path = _RAG_DOCS_DIR) -> list:
+    chunks = []
+    chunk_index = 0
+    for pdf_path in sorted(rag_docs_dir.glob("*.pdf")):
+        source = _source_name(pdf_path)
+        print(f"Extracting: {pdf_path.name}")
+        text = extract_text(pdf_path)
+        text = re.sub(r'\s+', ' ', text).strip()
+        for chunk_text_str in chunk_text(text):
+            chunks.append({
+                "chunk_id": f"chunk_{chunk_index:04d}",
+                "source": source,
+                "text": chunk_text_str,
+            })
+            chunk_index += 1
+        print(f"  → {chunk_index} total chunks so far")
     return chunks
 
 
 if __name__ == "__main__":
-    pdf_paths = glob.glob(os.path.join(RAG_DOCS_DIR, "*.pdf"))
-    # Exclude Zone.Identifier sidecar files (Windows artifact, not real PDFs)
-    pdf_paths = [p for p in pdf_paths if not p.endswith(":Zone.Identifier")]
-
-    all_chunks = []
-
-    for pdf_path in sorted(pdf_paths):
-        source_name = os.path.basename(pdf_path)
-        print(f"Processing: {source_name}")
-        try:
-            text = extract_pdf_text(pdf_path)
-            chunks = chunk_text(text, source_name)
-            all_chunks.extend(chunks)
-            print(f"  → {len(chunks)} chunks ({len(text.split())} words total)")
-        except Exception as e:
-            print(f"  ✗ Failed: {e}")
-
-    with open(CHUNKS_OUTPUT, "w", encoding="utf-8") as f:
-        json.dump(all_chunks, f, indent=2, ensure_ascii=False)
-
-    print(f"\nTotal chunks: {len(all_chunks)}")
-    print(f"Saved to: {CHUNKS_OUTPUT}")
+    chunks = build_chunks()
+    with open(_CHUNKS_PATH, "w", encoding="utf-8") as f:
+        json.dump(chunks, f, indent=2, ensure_ascii=False)
+    print(f"Wrote {len(chunks)} chunks to {_CHUNKS_PATH}")

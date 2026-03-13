@@ -1,26 +1,52 @@
-import json
-import os
+"""
+Shared Bedrock LLM client used by all three agents.
 
+Uses the AWS Bedrock converse API via boto3.  Model ID and region are read
+from environment variables:
+    BEDROCK_MODEL_ID  — defaults to "meta.llama3-1-70b-instruct-v1:0"
+    AWS_REGION        — defaults to "us-east-1"
+"""
+import os
 import boto3
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 
-def _build_prompt(prompt: str, system_prompt: str) -> str:
-    parts = ["<|begin_of_text|>"]
+def invoke_llm(
+    system_prompt: str,
+    user_message: str,
+    max_tokens: int = 4096,
+    temperature: float = 0.1,
+) -> str:
+    """
+    Sends a system prompt and user message to Amazon Bedrock and returns
+    the model's raw text response.
 
-    if system_prompt:
-        parts.append(
-            f"<|start_header_id|>system<|end_header_id|>\n\n{system_prompt}<|eot_id|>"
-        )
+    Args:
+        system_prompt: instructions for the model role/behaviour
+        user_message:  the actual content to analyse
+        max_tokens:    maximum tokens to generate (default 4096)
+        temperature:   sampling temperature (default 0.1)
 
-    parts.append(
-        f"<|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|>"
-        "<|start_header_id|>assistant<|end_header_id|>\n\n"
+    Returns:
+        str — the raw text from the model (expected to be valid JSON)
+    """
+    model_id = os.environ.get(
+        "BEDROCK_MODEL_ID", "meta.llama3-1-70b-instruct-v1:0"
+    )
+    region = os.environ.get("AWS_REGION", "us-east-1")
+
+    client = boto3.client("bedrock-runtime", region_name=region)
+
+    response = client.converse(
+        modelId=model_id,
+        system=[{"text": system_prompt}],
+        messages=[{"role": "user", "content": [{"text": user_message}]}],
+        inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
     )
 
-    return "".join(parts)
+    return response["output"]["message"]["content"][0]["text"]
 
 
 def call_llama(
@@ -29,25 +55,6 @@ def call_llama(
     max_tokens: int = 2048,
     temperature: float = 0.1,
 ) -> str:
-    region = os.environ["AWS_REGION"]
-    model_id = os.environ["BEDROCK_MODEL_ID"]
-
-    client = boto3.client("bedrock-runtime", region_name=region)
-
-    body = json.dumps(
-        {
-            "prompt": _build_prompt(prompt, system_prompt),
-            "max_gen_len": max_tokens,
-            "temperature": temperature,
-        }
-    )
-
-    response = client.invoke_model(
-        modelId=model_id,
-        body=body,
-        contentType="application/json",
-        accept="application/json",
-    )
-
-    result = json.loads(response["body"].read())
-    return result["generation"]
+    if not system_prompt:
+        system_prompt = "You are a helpful assistant."
+    return invoke_llm(system_prompt, prompt, max_tokens=max_tokens, temperature=temperature)

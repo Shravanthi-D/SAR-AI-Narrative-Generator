@@ -1,7 +1,24 @@
-import json
+"""
+Agent 2 — Regulatory Oracle
+
+Receives investigator findings, retrieves relevant regulations from the RAG
+vector store (OpenSearch), then uses the LLM to select and excerpt the most
+applicable rules.
+
+Input:
+    investigation (dict): output from Agent 1 (Investigator)
+    opensearch_client: an opensearchpy.OpenSearch instance
+
+Output dict keys:
+    applicable_regulations  — list of {source, summary, relevant_excerpt}
+    reporting_obligation    — plain-text statement of the filing deadline/requirement
+    regulatory_basis_summary — one-paragraph summary of the regulatory basis
+    retrieved_chunks        — raw chunks from OpenSearch (for lineage)
+"""
+
 import os
 import re
-
+import json
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
@@ -9,77 +26,55 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 from backend.agents.bedrock_client import call_llama
 from backend.rag.retriever import retrieve_regulations
 
-SYSTEM_PROMPT = (
-    "You are a regulatory compliance expert. "
-    "Only cite regulations present in the provided context. "
-    "NEVER cite a regulation not in the context. "
-    "Return JSON only."
+
+_SYSTEM_PROMPT = (
+    "You are a regulatory compliance expert for anti-money laundering. "
+    "Given the investigator findings and retrieved regulation excerpts, "
+    "identify all applicable rules and obligations. "
+    "Return ONLY valid JSON with exactly these keys: "
+    "applicable_regulations (array of objects each with source, summary, relevant_excerpt), "
+    "reporting_obligation, regulatory_basis_summary."
 )
 
-_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```")
 
-
-def _parse_llm_json(raw: str) -> dict:
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
-
-    match = _FENCE_RE.search(raw)
-    if match:
-        return json.loads(match.group(1))
-
-    raise json.JSONDecodeError("No valid JSON found in LLM response", raw, 0)
-
-
-def _build_semantic_query(investigation: dict) -> str:
-    primary_concern = investigation.get("primary_concern", "")
-    patterns = investigation.get("patterns_detected", [])
-    patterns_str = " ".join(patterns) if patterns else ""
-    return (
-        f"{primary_concern} {patterns_str} "
-        "AML reporting cash deposits threshold"
-    ).strip()
-
-
-def _format_chunks(chunks: list) -> str:
-    parts = []
-    for i, chunk in enumerate(chunks, start=1):
-        parts.append(f"[{i}] SOURCE: {chunk['source']}\nTEXT: {chunk['text']}")
-    return "\n\n".join(parts)
-
-
-def _build_user_prompt(investigation: dict, formatted_context: str) -> str:
-    account = investigation.get("account", "unknown")
-    patterns = investigation.get("patterns_detected", [])
-    primary_concern = investigation.get("primary_concern", "")
-    evidence_summary = investigation.get("evidence_summary", "")
-
-    return (
-        f"Account under review: {account}\n"
-        f"Detected patterns: {', '.join(patterns)}\n"
-        f"Primary concern: {primary_concern}\n"
-        f"Evidence summary: {evidence_summary}\n\n"
-        f"Relevant regulatory context:\n{formatted_context}\n\n"
-        "Based only on the regulatory context above, produce a JSON object with exactly these keys:\n"
-        "  applicable_regulations  — array of objects, each with keys:\n"
-        "                              source          (string — regulation name/ID from context)\n"
-        "                              summary         (string — one sentence summary)\n"
-        "                              relevant_excerpt (string — verbatim or close excerpt from context)\n"
-        "  reporting_obligation    — string describing what must be filed and when\n"
-        "  regulatory_basis_summary — string summarising the overall regulatory basis for filing\n\n"
-        "Respond with the JSON object only. No commentary, no markdown."
-    )
+def _strip_markdown_fences(text: str) -> str:
+    text = re.sub(r'^```(?:json)?\s*', '', text.strip())
+    text = re.sub(r'\s*```$', '', text)
+    return text.strip()
 
 
 def run_oracle(investigation: dict, opensearch_client) -> dict:
-    query = _build_semantic_query(investigation)
-    chunks = retrieve_regulations(query, opensearch_client, top_k=5)
+    concern = (investigation or {}).get("primary_concern", "SUSPICIOUS_ACTIVITY")
 
-    formatted_context = _format_chunks(chunks)
-    user_prompt = _build_user_prompt(investigation, formatted_context)
+    try:
+        retrieved = retrieve_regulations(concern, opensearch_client)
+    except Exception:
+        retrieved = []
 
-    raw = call_llama(user_prompt, system_prompt=SYSTEM_PROMPT, temperature=0.0)
-    result = _parse_llm_json(raw)
-    result["retrieved_chunks"] = chunks
+    user_message = (
+        f"Investigation findings:\n{json.dumps(investigation, indent=2, default=str)}\n\n"
+        f"Retrieved regulation excerpts:\n{json.dumps(retrieved, indent=2)}"
+    )
+
+    try:
+        raw = call_llama(user_message, _SYSTEM_PROMPT, max_tokens=2048)
+        result = json.loads(_strip_markdown_fences(raw))
+    except json.JSONDecodeError:
+        result = {
+            "applicable_regulations": [
+                {
+                    "source": r.get("source", ""),
+                    "summary": r.get("text", "")[:200],
+                    "relevant_excerpt": r.get("text", ""),
+                }
+                for r in retrieved
+                if r.get("source")
+            ],
+            "reporting_obligation": "File SAR within 30 days of detection per applicable law.",
+            "regulatory_basis_summary": (
+                f"Activity flagged as {concern} triggers mandatory SAR filing obligations."
+            ),
+        }
+
+    result["retrieved_chunks"] = retrieved
     return result

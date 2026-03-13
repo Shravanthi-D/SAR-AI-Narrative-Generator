@@ -1,1 +1,34 @@
 
+# Core backend
+fastapi
+uvicorn
+pydantic
+psycopg2-binary
+python-dotenv
+
+# AI / Agents
+boto3
+langchain
+langgraph
+langchain-aws
+
+# RAG and vector search
+pdfplumber
+opensearch-py
+
+# Graph analysis
+networkx
+
+# PII masking / security
+cryptography
+spacy
+
+# Frontend
+streamlit
+
+# Testing
+pytest
+
+# API utilities
+requests
+python-multipart

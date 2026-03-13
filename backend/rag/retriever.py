@@ -1,46 +1,54 @@
+"""
+RAG retriever — queries OpenSearch for regulation documents relevant to a
+given suspicious activity pattern.
+
+Input:
+    concern (str): e.g. "STRUCTURING", "LAYERING"
+    opensearch_client: opensearchpy.OpenSearch instance
+
+Output:
+    list of dicts with keys: source, text, score
+"""
+
 import os
-from opensearchpy import OpenSearch
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
-INDEX_NAME = "regulations"
+_INDEX_NAME = os.environ.get("OPENSEARCH_INDEX", "sar-regulations")
+_TOP_K = 5
 
 
-def retrieve_regulations(query: str, client: OpenSearch, top_k: int = 5) -> list:
+def retrieve_regulations(concern: str, opensearch_client) -> list:
     """
-    Embed the query and search OpenSearch with knn to find the top_k most
-    relevant regulation chunks.
+    Performs a keyword search against the regulations index in OpenSearch
+    and returns the top-K matching documents.
 
-    Returns a list of dicts with keys: source, chunk_id, text, score.
+    Args:
+        concern: the suspicious activity pattern label
+        opensearch_client: an initialised opensearchpy.OpenSearch instance
+
+    Returns:
+        list of dicts: [{source, text, score}, ...]
     """
-    from backend.rag.embedder import embed_text
-
-    query_vector = embed_text(query)
-
-    search_body = {
-        "size": top_k,
+    query = {
+        "size": _TOP_K,
         "query": {
-            "knn": {
-                "embedding": {
-                    "vector": query_vector,
-                    "k":      top_k,
-                }
+            "multi_match": {
+                "query": concern,
+                "fields": ["source", "text", "pattern_tags"],
             }
         },
-        "_source": ["chunk_id", "source", "text"],
     }
 
-    client.indices.refresh(index=INDEX_NAME)
-    response = client.search(index=INDEX_NAME, body=search_body)
+    response = opensearch_client.search(index=_INDEX_NAME, body=query)
+    hits = response.get("hits", {}).get("hits", [])
 
-    results = []
-    for hit in response["hits"]["hits"]:
-        results.append({
-            "source":   hit["_source"]["source"],
-            "chunk_id": hit["_source"]["chunk_id"],
-            "text":     hit["_source"]["text"],
-            "score":    hit["_score"],
-        })
-
-    return results
+    return [
+        {
+            "source": hit["_source"].get("source", ""),
+            "text": hit["_source"].get("text", ""),
+            "score": hit.get("_score", 0.0),
+        }
+        for hit in hits
+    ]
