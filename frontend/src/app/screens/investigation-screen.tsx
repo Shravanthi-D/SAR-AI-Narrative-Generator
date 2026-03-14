@@ -78,7 +78,9 @@ export function InvestigationScreen({ onReportReady, analystId }: InvestigationS
   const [generating, setGenerating] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
   const [progressDone, setProgressDone] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const generatePromiseRef = useRef<Promise<string> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     getSARCases().then(setCases).catch(() => setCases(FIGMA_CASES));
@@ -97,31 +99,39 @@ export function InvestigationScreen({ onReportReady, analystId }: InvestigationS
     setGenerating(true);
     setProgressStep(0);
     setProgressDone(false);
+    setGenerateError(null);
 
     // Fire the real API call immediately (runs in parallel with animation)
     const apiPromise = generateSAR(
       caseItem.account,
       caseItem.id,
-      "2026-01-01",
-      "2026-02-17",
+      "2024-01-01",
+      "2024-01-31",
     ).then((res) => res.report_id);
     generatePromiseRef.current = apiPromise;
 
     // Animate steps at 1.5s each
     let step = 0;
-    const interval = setInterval(() => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
       step += 1;
       setProgressStep(step);
       if (step >= PROGRESS_STEPS.length - 1) {
-        clearInterval(interval);
+        clearInterval(intervalRef.current!);
+        intervalRef.current = null;
         // Wait for the API to finish, then navigate
-        apiPromise.then((reportId) => {
-          setProgressDone(true);
-          setTimeout(() => {
+        apiPromise
+          .then((reportId) => {
+            setProgressDone(true);
+            setTimeout(() => {
+              setGenerating(false);
+              onReportReady(reportId);
+            }, 400);
+          })
+          .catch((err: Error) => {
             setGenerating(false);
-            onReportReady(reportId);
-          }, 400);
-        });
+            setGenerateError(err.message ?? "Generation failed. Please try again.");
+          });
       }
     }, 1500);
   };
@@ -142,10 +152,10 @@ export function InvestigationScreen({ onReportReady, analystId }: InvestigationS
 
         <div className="flex-1 overflow-y-auto">
           {cases.map((caseItem) => (
-            <button
+            <div
               key={caseItem.id}
               onClick={() => setSelectedCase(caseItem.id)}
-              className={`w-full px-4 py-3 border-b text-left transition-colors ${
+              className={`w-full px-4 py-3 border-b text-left transition-colors cursor-pointer ${
                 selectedCase === caseItem.id ? 'bg-[#0B1F3A]' : 'hover:bg-[#0B1F3A]'
               }`}
               style={{ borderColor: '#1F3A5F' }}
@@ -185,7 +195,7 @@ export function InvestigationScreen({ onReportReady, analystId }: InvestigationS
               >
                 Generate SAR
               </button>
-            </button>
+            </div>
           ))}
         </div>
       </div>
@@ -242,6 +252,26 @@ export function InvestigationScreen({ onReportReady, analystId }: InvestigationS
                 <div className="mt-4 flex items-center gap-2 text-[#10B981]" style={{ fontSize: '12px' }}>
                   <CheckCircle2 className="w-4 h-4" strokeWidth={1.5} />
                   <span>Complete — opening editor…</span>
+                </div>
+              )}
+              {generateError && (
+                <div className="mt-4 p-3 border border-[#DC2626]" style={{
+                  backgroundColor: '#DC262620',
+                  borderRadius: '2px'
+                }}>
+                  <div className="text-[#DC2626] mb-1" style={{ fontSize: '12px', fontWeight: 500 }}>
+                    Generation Failed
+                  </div>
+                  <div className="text-[#E5E7EB]" style={{ fontSize: '11px' }}>
+                    {generateError}
+                  </div>
+                  <button
+                    onClick={() => { setGenerating(false); setGenerateError(null); }}
+                    className="mt-2 px-3 py-1 text-white"
+                    style={{ backgroundColor: '#DC2626', fontSize: '11px', borderRadius: '2px' }}
+                  >
+                    Dismiss
+                  </button>
                 </div>
               )}
             </div>

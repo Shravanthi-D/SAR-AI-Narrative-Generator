@@ -1,4 +1,6 @@
+import logging
 import os
+import traceback
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -12,6 +14,8 @@ from backend.agents.investigator import run_investigator
 from backend.agents.oracle import run_oracle
 from backend.agents.composer import run_composer
 from backend.lineage.mapper import build_lineage_map
+
+logger = logging.getLogger(__name__)
 
 
 class SARState(TypedDict):
@@ -27,16 +31,23 @@ class SARState(TypedDict):
 
 
 def node_investigate(state: SARState) -> dict:
+    logger.info("Starting investigate node for account=%s, %d transactions",
+                state["account_token"], len(state.get("transactions", [])))
     try:
         result = run_investigator(state["account_token"], state["transactions"])
-        if (result or {}).get("status") == "NO_SUSPICIOUS_ACTIVITY":
+        status = (result or {}).get("status", "SUSPICIOUS")
+        logger.info("Investigate complete: status=%s, patterns=%s",
+                    status, (result or {}).get("patterns_detected", []))
+        if status == "NO_SUSPICIOUS_ACTIVITY":
             return {"investigation": result, "status": "NO_SUSPICIOUS_ACTIVITY"}
         return {"investigation": result, "status": "INVESTIGATED"}
     except Exception as e:
+        logger.error("Investigate node FAILED: %s\n%s", e, traceback.format_exc())
         return {"status": "ERROR", "error": str(e)}
 
 
 def node_retrieve_regs(state: SARState) -> dict:
+    logger.info("Starting oracle node — building OpenSearch client")
     try:
         opensearch_client = OpenSearch(
             hosts=[os.environ.get("OPENSEARCH_URL", "http://localhost:9200")],
@@ -48,28 +59,41 @@ def node_retrieve_regs(state: SARState) -> dict:
             ssl_show_warn=False,
         )
         result = run_oracle(state["investigation"], opensearch_client)
+        reg_count = len((result or {}).get("applicable_regulations", []))
+        logger.info("Oracle complete: %d regulations retrieved", reg_count)
         return {"regulations": result, "status": "REGS_RETRIEVED"}
     except Exception as e:
+        logger.error("Oracle node FAILED: %s\n%s", e, traceback.format_exc())
         return {"status": "ERROR", "error": str(e)}
 
 
 def node_compose(state: SARState) -> dict:
+    logger.info("Starting composer node")
     try:
         result = run_composer(
             state["investigation"], state["regulations"], state["account_token"]
         )
+        sections = {k: bool(result.get(k)) for k in [
+            "section_1_subject", "section_2_activity",
+            "section_3_why_suspicious", "section_4_regulatory_basis", "section_5_evidence"
+        ]}
+        logger.info("Composer complete: section fill status=%s", sections)
         return {"narrative": result, "status": "DRAFT_COMPLETE"}
     except Exception as e:
+        logger.error("Composer node FAILED: %s\n%s", e, traceback.format_exc())
         return {"status": "ERROR", "error": str(e)}
 
 
 def node_lineage(state: SARState) -> dict:
+    logger.info("Starting lineage node")
     try:
         result = build_lineage_map(
             state["narrative"], state["investigation"], state["regulations"]
         )
+        logger.info("Lineage complete: %d lineage records built", len(result))
         return {"lineage": result, "status": "LINEAGE_COMPLETE"}
     except Exception as e:
+        logger.error("Lineage node FAILED: %s\n%s", e, traceback.format_exc())
         return {"status": "ERROR", "error": str(e)}
 
 
@@ -105,6 +129,10 @@ _graph = build_sar_graph()
 
 
 def run_sar_pipeline(case_id: str, account_token: str, transactions: list) -> dict:
+    logger.info(
+        "run_sar_pipeline: case_id=%s account=%s txn_count=%d",
+        case_id, account_token, len(transactions),
+    )
     initial_state: SARState = {
         "case_id": case_id,
         "account_token": account_token,
@@ -116,4 +144,10 @@ def run_sar_pipeline(case_id: str, account_token: str, transactions: list) -> di
         "status": "STARTED",
         "error": None,
     }
-    return _graph.invoke(initial_state)
+    final_state = _graph.invoke(initial_state)
+    logger.info(
+        "run_sar_pipeline complete: status=%s lineage_records=%d",
+        final_state.get("status"),
+        len(final_state.get("lineage") or []),
+    )
+    return final_state

@@ -19,20 +19,21 @@ _INDEX_NAME = os.environ.get("OPENSEARCH_INDEX", "sar-regulations")
 _TOP_K = 5
 
 
-def retrieve_regulations(concern: str, opensearch_client) -> list:
+def retrieve_regulations(concern: str, opensearch_client, top_k: int = _TOP_K) -> list:
     """
     Performs a keyword search against the regulations index in OpenSearch
     and returns the top-K matching documents.
 
     Args:
-        concern: the suspicious activity pattern label
+        concern:           the suspicious activity pattern or semantic query
         opensearch_client: an initialised opensearchpy.OpenSearch instance
+        top_k:             number of results to return (default 5)
 
     Returns:
-        list of dicts: [{source, text, score}, ...]
+        list of dicts: [{chunk_id, source, text, score}, ...]
     """
     query = {
-        "size": _TOP_K,
+        "size": top_k,
         "query": {
             "multi_match": {
                 "query": concern,
@@ -46,9 +47,10 @@ def retrieve_regulations(concern: str, opensearch_client) -> list:
 
     return [
         {
-            "source": hit["_source"].get("source", ""),
-            "text": hit["_source"].get("text", ""),
-            "score": hit.get("_score", 0.0),
+            "chunk_id": hit["_source"].get("chunk_id", hit.get("_id", "")),
+            "source":   hit["_source"].get("source", ""),
+            "text":     hit["_source"].get("text", ""),
+            "score":    hit.get("_score", 0.0),
         }
         for hit in hits
     ]

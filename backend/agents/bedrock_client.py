@@ -1,60 +1,80 @@
 """
 Shared Bedrock LLM client used by all three agents.
 
-Uses the AWS Bedrock converse API via boto3.  Model ID and region are read
-from environment variables:
+Uses the invoke_model API with Llama 3 instruct prompt format.
+Model ID and region are read from environment variables:
     BEDROCK_MODEL_ID  — defaults to "meta.llama3-1-70b-instruct-v1:0"
     AWS_REGION        — defaults to "us-east-1"
 """
+import json
 import os
+
 import boto3
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 
-def invoke_llm(
-    system_prompt: str,
-    user_message: str,
-    max_tokens: int = 4096,
-    temperature: float = 0.1,
-) -> str:
+def _build_prompt(user_message: str, system_prompt: str) -> str:
     """
-    Sends a system prompt and user message to Amazon Bedrock and returns
-    the model's raw text response.
+    Build a Llama 3 instruct-format prompt string.
 
-    Args:
-        system_prompt: instructions for the model role/behaviour
-        user_message:  the actual content to analyse
-        max_tokens:    maximum tokens to generate (default 4096)
-        temperature:   sampling temperature (default 0.1)
+    When system_prompt is non-empty the system block is prepended:
+        <|begin_of_text|>
+        <|start_header_id|>system<|end_header_id|>\\n\\n{system_prompt}<|eot_id|>
+        <|start_header_id|>user<|end_header_id|>\\n\\n{user_message}<|eot_id|>
+        <|start_header_id|>assistant<|end_header_id|>\\n\\n
 
-    Returns:
-        str — the raw text from the model (expected to be valid JSON)
+    When system_prompt is empty the system block is omitted entirely.
     """
-    model_id = os.environ.get(
-        "BEDROCK_MODEL_ID", "meta.llama3-1-70b-instruct-v1:0"
+    parts = ["<|begin_of_text|>"]
+    if system_prompt:
+        parts.append(
+            f"<|start_header_id|>system<|end_header_id|>\n\n"
+            f"{system_prompt}<|eot_id|>"
+        )
+    parts.append(
+        f"<|start_header_id|>user<|end_header_id|>\n\n"
+        f"{user_message}<|eot_id|>"
+        f"<|start_header_id|>assistant<|end_header_id|>\n\n"
     )
-    region = os.environ.get("AWS_REGION", "us-east-1")
-
-    client = boto3.client("bedrock-runtime", region_name=region)
-
-    response = client.converse(
-        modelId=model_id,
-        system=[{"text": system_prompt}],
-        messages=[{"role": "user", "content": [{"text": user_message}]}],
-        inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
-    )
-
-    return response["output"]["message"]["content"][0]["text"]
+    return "".join(parts)
 
 
 def call_llama(
-    prompt: str,
+    user_message: str,
+    *,
     system_prompt: str = "",
     max_tokens: int = 2048,
     temperature: float = 0.1,
 ) -> str:
-    if not system_prompt:
-        system_prompt = "You are a helpful assistant."
-    return invoke_llm(system_prompt, prompt, max_tokens=max_tokens, temperature=temperature)
+    """
+    Call the Llama 3 model on Amazon Bedrock via invoke_model.
+
+    Args:
+        user_message:  The content to analyse.
+        system_prompt: Role/behaviour instructions for the model.
+        max_tokens:    Maximum tokens to generate (default 2048).
+        temperature:   Sampling temperature (default 0.1).
+
+    Returns:
+        str — raw text response from the model.
+    """
+    model_id = os.environ.get("BEDROCK_MODEL_ID", "meta.llama3-1-70b-instruct-v1:0")
+    region = os.environ.get("AWS_REGION", "us-east-1")
+
+    prompt = _build_prompt(user_message, system_prompt)
+    body = json.dumps({
+        "prompt":      prompt,
+        "temperature": temperature,
+        "max_gen_len": max_tokens,
+    })
+
+    client = boto3.client("bedrock-runtime", region_name=region)
+    response = client.invoke_model(
+        modelId=model_id,
+        body=body,
+        contentType="application/json",
+        accept="application/json",
+    )
+    return json.loads(response["body"].read())["generation"]

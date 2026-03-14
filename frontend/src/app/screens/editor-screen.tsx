@@ -6,9 +6,10 @@ import { EvidencePanel } from "../components/EvidencePanel";
 interface EditorScreenProps {
   reportId: string | null;
   analystId: string;
+  onNavigate?: (screen: string) => void;
 }
 
-export function EditorScreen({ reportId, analystId }: EditorScreenProps) {
+export function EditorScreen({ reportId, analystId, onNavigate }: EditorScreenProps) {
   const [report, setReport] = useState<SARReport | null>(null);
   const [sections, setSections] = useState({
     section_1_subject: "",
@@ -37,9 +38,17 @@ export function EditorScreen({ reportId, analystId }: EditorScreenProps) {
   const handleApprove = async () => {
     if (!reportId) return;
     setApproving(true);
-    const result = await approveSAR(reportId, analystId, sections);
-    setApprovalResult({ hash: result.blockchain_hash, txn: result.blockchain_txn });
-    setApproving(false);
+    try {
+      const result = await approveSAR(reportId, analystId, sections, true);
+      setApprovalResult({ hash: result.blockchain_hash ?? "", txn: result.blockchain_txn ?? "" });
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!reportId) return;
+    await approveSAR(reportId, analystId, sections, false);
   };
 
   const sectionLabels: Array<[keyof typeof sections, string]> = [
@@ -91,12 +100,16 @@ export function EditorScreen({ reportId, analystId }: EditorScreenProps) {
                 Document Editor
               </div>
               <div className="flex gap-2">
-                <button className="px-3 py-1.5 text-white" style={{
-                  backgroundColor: '#1F4ED8',
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  borderRadius: '2px'
-                }}>
+                <button
+                  onClick={handleSaveDraft}
+                  className="px-3 py-1.5 text-white hover:opacity-90 transition-opacity"
+                  style={{
+                    backgroundColor: '#1F4ED8',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    borderRadius: '2px'
+                  }}
+                >
                   Save Draft
                 </button>
               </div>
@@ -171,6 +184,15 @@ export function EditorScreen({ reportId, analystId }: EditorScreenProps) {
                     {approvalResult.txn}
                   </div>
                 </>
+              )}
+              {onNavigate && (
+                <button
+                  onClick={() => onNavigate("blockchain")}
+                  className="mt-3 w-full py-2 text-white hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: '#7C3AED', fontSize: '12px', fontWeight: 500, borderRadius: '2px' }}
+                >
+                  View Blockchain Record →
+                </button>
               )}
             </div>
           )}

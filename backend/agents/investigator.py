@@ -20,9 +20,10 @@ Output dict keys:
     transactions            — full dicts for the evidence transactions
 """
 
+import json
 import os
 import re
-import json
+
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
@@ -42,50 +43,58 @@ _SYSTEM_PROMPT = (
     "transaction_ids, status."
 )
 
-
-def _strip_markdown_fences(text: str) -> str:
-    text = re.sub(r'^```(?:json)?\s*', '', text.strip())
-    text = re.sub(r'\s*```$', '', text)
-    return text.strip()
+_FENCE_RE = re.compile(r'```(?:json)?\s*(.*?)\s*```', re.DOTALL)
+_BRACE_RE = re.compile(r'\{.*\}', re.DOTALL)
 
 
-def _build_fallback(account_token: str, findings: list, transactions: list) -> dict:
-    all_txn_ids = []
-    total_amount = 0.0
-    patterns = []
+def _parse_llm_json(raw: str) -> dict:
+    """
+    Extract and parse JSON from an LLM response that may contain preamble text.
+    Tries in order:
+      1. Markdown code fence (anywhere in the response)
+      2. Raw JSON object (first { ... } block)
+    Raises json.JSONDecodeError if no valid JSON found.
+    """
+    cleaned = raw.strip()
+    # Try code fence anywhere in response
+    m = _FENCE_RE.search(cleaned)
+    if m:
+        return json.loads(m.group(1).strip())
+    # Try extracting first { ... } block
+    m2 = _BRACE_RE.search(cleaned)
+    if m2:
+        return json.loads(m2.group(0))
+    return json.loads(cleaned)  # will raise JSONDecodeError if still not valid
 
+
+def _build_user_prompt(account_token: str, findings: list, transactions: list) -> str:
+    """Build the user message sent to the LLM."""
+    all_txn_ids: set = set()
     for f in findings:
-        patterns.append(f["pattern"])
-        all_txn_ids.extend(f.get("transactions", []))
-        total_amount += f.get("total_amount", 0.0)
+        all_txn_ids.update(f.get("transactions", []))
 
-    txn_id_set = set(all_txn_ids)
-    evidence_txns = [t for t in transactions if t.get("txn_id") in txn_id_set]
-
+    matching = [t for t in transactions if t.get("txn_id") in all_txn_ids]
     timestamps = sorted(
         str(t.get("txn_timestamp", ""))
-        for t in evidence_txns
+        for t in matching
         if t.get("txn_timestamp")
     )
 
-    time_period = {
-        "start": timestamps[0] if timestamps else "unknown",
-        "end": timestamps[-1] if timestamps else "unknown",
-    }
+    if timestamps:
+        date_range = f"{timestamps[0][:10]} to {timestamps[-1][:10]}"
+    else:
+        date_range = "unknown"
 
-    descriptions = " ".join(f.get("description", "") for f in findings)
-
-    return {
-        "status": "SUSPICIOUS",
-        "account": account_token,
-        "patterns_detected": patterns,
-        "primary_concern": patterns[0] if patterns else "UNKNOWN",
-        "evidence_summary": descriptions,
-        "total_suspicious_amount": round(total_amount, 2),
-        "time_period": time_period,
-        "transaction_ids": list(dict.fromkeys(all_txn_ids)),
-        "transactions": evidence_txns,
-    }
+    return (
+        f"Account: {account_token}\n\n"
+        f"Time period: {date_range}\n\n"
+        f"Pattern findings from graph analysis:\n"
+        f"{json.dumps(findings, indent=2, default=str)}\n\n"
+        f"All transactions (masked):\n"
+        f"{json.dumps(transactions, indent=2, default=str)}\n\n"
+        f"Return JSON with keys: account, patterns_detected, primary_concern, "
+        f"evidence_summary, total_suspicious_amount, time_period, transaction_ids, status."
+    )
 
 
 def run_investigator(account_token: str, transactions: list) -> dict:
@@ -95,23 +104,20 @@ def run_investigator(account_token: str, transactions: list) -> dict:
     if not findings:
         return {"status": "NO_SUSPICIOUS_ACTIVITY", "findings": []}
 
-    user_message = (
-        f"Account: {account_token}\n\n"
-        f"Pattern findings from graph analysis:\n"
-        f"{json.dumps(findings, indent=2, default=str)}\n\n"
-        f"All transactions (masked):\n"
-        f"{json.dumps(transactions, indent=2, default=str)}"
-    )
+    user_message = _build_user_prompt(account_token, findings, transactions)
 
-    try:
-        raw = call_llama(user_message, _SYSTEM_PROMPT, max_tokens=2048)
-        result = json.loads(_strip_markdown_fences(raw))
-        result.setdefault("status", "SUSPICIOUS")
-        txn_id_set = set(result.get("transaction_ids", []))
-        result.setdefault(
-            "transactions",
-            [t for t in transactions if t.get("txn_id") in txn_id_set],
-        )
-        return result
-    except json.JSONDecodeError:
-        return _build_fallback(account_token, findings, transactions)
+    raw = call_llama(
+        user_message,
+        system_prompt=_SYSTEM_PROMPT,
+        max_tokens=2048,
+        temperature=0.0,
+    )
+    result = _parse_llm_json(raw)
+    result.setdefault("status", "SUSPICIOUS")
+
+    txn_id_set = set(result.get("transaction_ids", []))
+    result.setdefault(
+        "transactions",
+        [t for t in transactions if t.get("txn_id") in txn_id_set],
+    )
+    return result

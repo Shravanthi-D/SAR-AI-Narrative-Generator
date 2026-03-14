@@ -26,7 +26,9 @@ def embed_text(text: str) -> list:
     return result["embedding"]
 
 
-def setup_index(client: OpenSearch, index: str = "regulations") -> None:
+_INDEX_NAME = os.environ.get("OPENSEARCH_INDEX", "sar-regulations")
+
+def setup_index(client: OpenSearch, index: str = _INDEX_NAME) -> None:
     index_body = {
         "settings": {
             "index": {
@@ -52,7 +54,7 @@ def setup_index(client: OpenSearch, index: str = "regulations") -> None:
             raise
 
 
-def index_all_chunks(chunks_json_path: str, client: OpenSearch, index: str = "regulations") -> None:
+def index_all_chunks(chunks_json_path: str, client: OpenSearch, index: str = _INDEX_NAME) -> None:
     with open(chunks_json_path, "r", encoding="utf-8") as f:
         chunks = json.load(f)
 
@@ -68,6 +70,19 @@ def index_all_chunks(chunks_json_path: str, client: OpenSearch, index: str = "re
 
         if (i + 1) % 10 == 0:
             print(f"Indexed {i + 1}/{len(chunks)} chunks")
+
+
+def get_opensearch_client() -> OpenSearch:
+    """Return an initialised OpenSearch client using environment variables."""
+    return OpenSearch(
+        hosts=[os.environ.get("OPENSEARCH_URL", "http://localhost:9200")],
+        http_auth=(
+            os.environ.get("OPENSEARCH_USER", "admin"),
+            os.environ.get("OPENSEARCH_PASS", "admin"),
+        ),
+        verify_certs=False,
+        ssl_show_warn=False,
+    )
 
 
 if __name__ == "__main__":

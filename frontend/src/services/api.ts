@@ -10,6 +10,7 @@ export interface SARCase {
   status: string;
   assignee: string;
   timestamp: string;
+  report_id?: string | null;
 }
 
 export interface SARReport {
@@ -37,17 +38,8 @@ export interface SARReport {
 export interface LineageEntry {
   sentence_index: number;
   sentence: string;
-  transactions: Array<{
-    txn_id: string;
-    amount: number;
-    type: string;
-    date: string;
-  }>;
-  regulations: Array<{
-    id: string;
-    title: string;
-    excerpt: string;
-  }>;
+  transactions: unknown[];
+  regulations: unknown[];
 }
 
 export interface GenerateSARResponse {
@@ -58,28 +50,37 @@ export interface GenerateSARResponse {
 export interface ApproveSARResponse {
   report_id: string;
   status: string;
-  blockchain_hash: string;
-  blockchain_txn: string;
+  blockchain_hash: string | null;
+  blockchain_txn: string | null;
 }
 
 export interface VerifyResponse {
-  verified: boolean;
+  integrity_valid: boolean;
   report_id: string;
-  blockchain_hash: string;
-  block_number: string;
-  timestamp: string;
-  network: string;
-  confirmations: number;
+  blockchain_hash?: string;
+  blockchain_txn?: string;
+  timestamp?: string;
+  reason?: string;
+}
+
+export interface AuditLog {
+  id: number;
+  user_id: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  details: Record<string, unknown>;
+  created_at: string;
 }
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
 
 const MOCK_CASES: SARCase[] = [
-  { id: "SAR-2026-00421", account: "ACC_001", customer: "Customer_A", type: "Wire Transfer",        amount: "$95,000",  risk: 94, status: "Pending Review",      assignee: "J. Doe",      timestamp: "2026-02-17 09:23" },
-  { id: "SAR-2026-00420", account: "ACC_002", customer: "Customer_B", type: "Cash Deposit",         amount: "$48,500",  risk: 87, status: "Under Investigation", assignee: "M. Smith",    timestamp: "2026-02-17 08:15" },
-  { id: "SAR-2026-00419", account: "ACC_003", customer: "Customer_C", type: "Multiple Transfers",   amount: "$125,000", risk: 72, status: "Approved",            assignee: "R. Johnson",  timestamp: "2026-02-17 07:42" },
-  { id: "SAR-2026-00418", account: "ACC_004", customer: "Customer_D", type: "Structured Deposits",  amount: "$87,300",  risk: 68, status: "Finalized",           assignee: "K. Williams", timestamp: "2026-02-16 16:20" },
-  { id: "SAR-2026-00417", account: "ACC_005", customer: "Customer_E", type: "International Wire",   amount: "$210,000", risk: 91, status: "Pending Review",      assignee: "J. Doe",      timestamp: "2026-02-16 14:35" },
+  { id: "SAR-2026-00421", account: "ACC_001", customer: "Customer_A", type: "Wire Transfer",        amount: "$95,000",  risk: 94, status: "Pending Review",      assignee: "J. Doe",      timestamp: "2026-02-17 09:23", report_id: null },
+  { id: "SAR-2026-00420", account: "ACC_002", customer: "Customer_B", type: "Cash Deposit",         amount: "$48,500",  risk: 87, status: "Under Investigation", assignee: "M. Smith",    timestamp: "2026-02-17 08:15", report_id: null },
+  { id: "SAR-2026-00419", account: "ACC_003", customer: "Customer_C", type: "Multiple Transfers",   amount: "$125,000", risk: 72, status: "Approved",            assignee: "R. Johnson",  timestamp: "2026-02-17 07:42", report_id: null },
+  { id: "SAR-2026-00418", account: "ACC_004", customer: "Customer_D", type: "Structured Deposits",  amount: "$87,300",  risk: 68, status: "Finalized",           assignee: "K. Williams", timestamp: "2026-02-16 16:20", report_id: null },
+  { id: "SAR-2026-00417", account: "ACC_005", customer: "Customer_E", type: "International Wire",   amount: "$210,000", risk: 91, status: "Pending Review",      assignee: "J. Doe",      timestamp: "2026-02-16 14:35", report_id: null },
 ];
 
 const MOCK_REPORT: SARReport = {
@@ -117,41 +118,24 @@ const MOCK_REPORT: SARReport = {
 const MOCK_LINEAGE: LineageEntry[] = [
   {
     sentence_index: 0,
-    sentence:
-      "This SAR is filed regarding structuring activity detected in account ACC_001.",
+    sentence: "This SAR is filed regarding structuring activity detected in account ACC_001.",
     transactions: [
-      { txn_id: "TXN_001", amount: 9800.0, type: "Cash Deposit", date: "2024-01-02" },
-      { txn_id: "TXN_002", amount: 9500.0, type: "Cash Deposit", date: "2024-01-03" },
+      { txn_id: "TXN_001", amount: 9800.0, txn_type: "CASH_DEPOSIT", txn_timestamp: "2024-01-02" },
+      { txn_id: "TXN_002", amount: 9500.0, txn_type: "CASH_DEPOSIT", txn_timestamp: "2024-01-03" },
     ],
     regulations: [
-      { id: "FATF_20",  title: "FATF Recommendation 20", excerpt: "Financial institutions should report suspicious transactions to the FIU when they suspect or have reasonable grounds to suspect that funds are proceeds of criminal activity." },
-      { id: "PMLA_12", title: "PMLA Section 12",         excerpt: "Every banking company, financial institution and intermediary shall furnish information of prescribed transactions to the Director within the prescribed time." },
+      { source: "FATF Recommendation 20", summary: "Suspicious transaction reporting", relevant_excerpt: "Financial institutions should report suspicious transactions to the FIU when they suspect or have reasonable grounds to suspect that funds are proceeds of criminal activity." },
     ],
   },
   {
     sentence_index: 1,
-    sentence:
-      "Multiple cash deposits were made just below the $10,000 reporting threshold.",
+    sentence: "Multiple cash deposits were made just below the $10,000 reporting threshold.",
     transactions: [
-      { txn_id: "TXN_003", amount: 9700.0, type: "Cash Deposit", date: "2024-01-05" },
-      { txn_id: "TXN_004", amount: 9200.0, type: "Cash Deposit", date: "2024-01-07" },
-      { txn_id: "TXN_005", amount: 9900.0, type: "Cash Deposit", date: "2024-01-09" },
+      { txn_id: "TXN_003", amount: 9700.0, txn_type: "CASH_DEPOSIT", txn_timestamp: "2024-01-05" },
+      { txn_id: "TXN_004", amount: 9200.0, txn_type: "CASH_DEPOSIT", txn_timestamp: "2024-01-07" },
     ],
     regulations: [
-      { id: "BSA_314", title: "BSA Section 314(a)", excerpt: "Requires financial institutions to search their records for accounts and transactions upon request from law enforcement." },
-    ],
-  },
-  {
-    sentence_index: 2,
-    sentence:
-      "The structuring pattern is consistent with deliberate CTR evasion.",
-    transactions: [
-      { txn_id: "TXN_006", amount: 9600.0, type: "Cash Deposit", date: "2024-01-10" },
-      { txn_id: "TXN_007", amount: 9400.0, type: "Cash Deposit", date: "2024-01-12" },
-    ],
-    regulations: [
-      { id: "FATF_20",  title: "FATF Recommendation 20", excerpt: "Financial institutions should report suspicious transactions to the FIU when they suspect or have reasonable grounds to suspect that funds are proceeds of criminal activity." },
-      { id: "BSA_314", title: "BSA Section 314(a)",      excerpt: "Requires financial institutions to search their records for accounts and transactions upon request from law enforcement." },
+      { source: "PMLA Section 12", summary: "Reporting obligations", relevant_excerpt: "Every banking company, financial institution and intermediary shall furnish information of prescribed transactions to the Director within the prescribed time." },
     ],
   },
 ];
@@ -159,14 +143,19 @@ const MOCK_LINEAGE: LineageEntry[] = [
 // ─── API Helpers ──────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  console.log(`[API] ${options?.method ?? "GET"} ${url}`, options?.body ? JSON.parse(options.body as string) : "");
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    const errorText = await response.text();
+    console.error(`[API] ERROR ${response.status} ${url}:`, errorText);
+    throw new Error(`HTTP ${response.status}: ${errorText}`);
   }
-  return response.json() as Promise<T>;
+  const data = await response.json() as T;
+  console.log(`[API] Response ${url}:`, data);
+  return data;
 }
 
 // ─── Public API Functions ──────────────────────────────────────────────────────
@@ -185,14 +174,11 @@ export async function generateSAR(
   date_from: string,
   date_to: string,
 ): Promise<GenerateSARResponse> {
-  try {
-    return await apiFetch<GenerateSARResponse>("/api/sar/generate", {
-      method: "POST",
-      body: JSON.stringify({ account_token, alert_id, date_from, date_to }),
-    });
-  } catch {
-    return { report_id: `RPT-${alert_id}-001`, status: "generated" };
-  }
+  // No fallback — let errors surface to the caller
+  return apiFetch<GenerateSARResponse>("/api/sar/generate", {
+    method: "POST",
+    body: JSON.stringify({ account_token, alert_id, date_from, date_to }),
+  });
 }
 
 export async function getSAR(report_id: string): Promise<SARReport> {
@@ -215,11 +201,12 @@ export async function approveSAR(
   report_id: string,
   analyst_id: string,
   edits: Record<string, string>,
+  is_final: boolean = true,
 ): Promise<ApproveSARResponse> {
   try {
     return await apiFetch<ApproveSARResponse>("/api/sar/approve", {
       method: "POST",
-      body: JSON.stringify({ report_id, analyst_id, edits }),
+      body: JSON.stringify({ report_id, analyst_id, edits, is_final }),
     });
   } catch {
     const hash = Array.from(
@@ -235,8 +222,8 @@ export async function approveSAR(
     return {
       report_id,
       status: "approved",
-      blockchain_hash: `0x${hash}`,
-      blockchain_txn: `0x${hash.substring(0, 40)}`,
+      blockchain_hash: hash,
+      blockchain_txn: `MOCK_BC_${hash.substring(0, 8).toUpperCase()}`,
     };
   }
 }
@@ -246,13 +233,26 @@ export async function verifySAR(report_id: string): Promise<VerifyResponse> {
     return await apiFetch<VerifyResponse>(`/api/sar/${report_id}/verify`);
   } catch {
     return {
-      verified: true,
+      integrity_valid: true,
       report_id,
-      blockchain_hash: "0x8a3f7c2b9e1d4a6fbc472e1a8d5f3c9e2b7a4d6f1c8e5a3b9f2d7c4e6a1b8c3d",
-      block_number: "#18,429,847",
-      timestamp: "2026-02-17 10:15:42 UTC",
-      network: "Ethereum Mainnet",
-      confirmations: 1247,
+      blockchain_hash: "fallback-hash-mock",
+      timestamp: new Date().toISOString(),
     };
+  }
+}
+
+export async function tamperDemo(report_id: string): Promise<{ tampered: boolean; message: string }> {
+  return apiFetch(`/api/sar/${report_id}/tamper-demo`, { method: "POST" });
+}
+
+export async function restoreReport(report_id: string): Promise<{ restored: boolean }> {
+  return apiFetch(`/api/sar/${report_id}/restore`, { method: "POST" });
+}
+
+export async function getAuditLogs(): Promise<AuditLog[]> {
+  try {
+    return await apiFetch<AuditLog[]>("/api/audit/logs");
+  } catch {
+    return [];
   }
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Clock, FileEdit, CheckCircle2 } from "lucide-react";
-import { getSARCases } from "../../services/api";
+import { getAuditLogs, type AuditLog } from "../../services/api";
 
 interface AuditEntry {
   timestamp: string;
@@ -27,24 +27,35 @@ export function AuditScreen() {
   const [auditHistory, setAuditHistory] = useState<AuditEntry[]>(FIGMA_AUDIT);
 
   useEffect(() => {
-    // Audit is derived from cases — fall back to figma data on error
-    getSARCases()
-      .then((cases) => {
-        if (cases.length === 0) return;
-        // Build synthetic audit rows from live case data, augmented with figma rows
-        const liveRows: AuditEntry[] = cases.slice(0, 3).map((c) => ({
-          timestamp: c.timestamp ?? "2026-02-17 09:00:00",
-          action: "Case Flagged",
-          user: c.assignee,
-          userId: "SYS-MON",
+    getAuditLogs()
+      .then((logs: AuditLog[]) => {
+        if (!logs || logs.length === 0) {
+          setAuditHistory(FIGMA_AUDIT);
+          return;
+        }
+        const liveRows: AuditEntry[] = logs.map((log) => ({
+          timestamp: log.created_at?.substring(0, 19).replace("T", " ") ?? "—",
+          action: log.action ?? "Unknown",
+          user: log.user_id ?? "System",
+          userId: log.user_id ?? "SYS",
           version: "—",
-          status: "Flagged",
-          details: `Case ${c.id} flagged for review — ${c.customer} — ${c.type}`,
+          status: _actionToStatus(log.action),
+          details: log.entity_type
+            ? `${log.entity_type} ${log.entity_id} — ${JSON.stringify(log.details ?? {})}`
+            : JSON.stringify(log.details ?? {}),
         }));
-        setAuditHistory([...FIGMA_AUDIT.slice(0, 5), ...liveRows]);
+        setAuditHistory(liveRows.length > 0 ? liveRows : FIGMA_AUDIT);
       })
       .catch(() => setAuditHistory(FIGMA_AUDIT));
   }, []);
+
+  function _actionToStatus(action: string): string {
+    if (action === "APPROVE") return "Approved";
+    if (action === "SAVE_DRAFT") return "Modified";
+    if (action === "BLOCKCHAIN_ANCHOR") return "Completed";
+    if (action === "SAR_GENERATED") return "Generated";
+    return "Calculated";
+  }
 
   const getStatusColor = (status: string) => {
     if (status === "Approved") return "#10B981";

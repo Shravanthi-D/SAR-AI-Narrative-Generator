@@ -304,8 +304,13 @@ class TestRunComposer:
 
     @patch("backend.agents.composer.call_llama", return_value="not json at all")
     def test_raises_on_unparseable_response(self, mock_llm):
-        with pytest.raises(json.JSONDecodeError):
-            run_composer(SAMPLE_INVESTIGATION, SAMPLE_REGULATIONS, "ACC_001")
+        # When LLM returns unparseable JSON on both attempts, the composer falls
+        # back to a Python-built narrative rather than raising — validate sections exist.
+        result = run_composer(SAMPLE_INVESTIGATION, SAMPLE_REGULATIONS, "ACC_001")
+        for key in ["section_1_subject", "section_2_activity", "section_3_why_suspicious",
+                    "section_4_regulatory_basis", "section_5_evidence"]:
+            assert key in result
+            assert isinstance(result[key], str) and result[key].strip()
 
     @patch("backend.agents.composer.call_llama", return_value=json.dumps(GOOD_LLM_RESPONSE))
     def test_regulations_passed_to_prompt(self, mock_llm):

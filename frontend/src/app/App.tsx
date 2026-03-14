@@ -79,7 +79,7 @@ function AppInner() {
           <Routes>
             <Route path="/dashboard"  element={<DashboardScreen onNavigate={handleNavigate} />} />
             <Route path="/cases"      element={<InvestigationScreen onReportReady={handleReportReady} analystId={analystId} />} />
-            <Route path="/editor"     element={<EditorScreen reportId={currentReportId} analystId={analystId} />} />
+            <Route path="/editor"     element={<EditorScreen reportId={currentReportId} analystId={analystId} onNavigate={handleNavigate} />} />
             <Route path="/audit"      element={<AuditScreen />} />
             <Route path="/blockchain" element={<BlockchainScreen reportId={currentReportId} />} />
             <Route path="/settings"   element={

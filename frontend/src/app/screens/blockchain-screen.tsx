@@ -1,75 +1,89 @@
 import { useState, useEffect } from "react";
-import { CheckCircle2, Blocks, ExternalLink, XCircle } from "lucide-react";
-import { getSAR, verifySAR, type SARReport, type VerifyResponse } from "../../services/api";
+import { CheckCircle2, Blocks, ExternalLink, XCircle, AlertTriangle } from "lucide-react";
+import { getSAR, verifySAR, tamperDemo, restoreReport, getSARCases, type SARReport, type VerifyResponse } from "../../services/api";
 
 interface BlockchainScreenProps {
   reportId: string | null;
 }
 
-export function BlockchainScreen({ reportId }: BlockchainScreenProps) {
+export function BlockchainScreen({ reportId: propReportId }: BlockchainScreenProps) {
+  const [reportId, setReportId] = useState<string | null>(propReportId);
   const [report, setReport] = useState<SARReport | null>(null);
   const [verifyResult, setVerifyResult] = useState<VerifyResponse | null>(null);
   const [verifying, setVerifying] = useState(false);
-  const [verifyError, setVerifyError] = useState(false);
+  const [tampering, setTampering] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [tamperMessage, setTamperMessage] = useState<string | null>(null);
+
+  // If no reportId passed, find most recently approved case
+  useEffect(() => {
+    if (propReportId) {
+      setReportId(propReportId);
+      return;
+    }
+    getSARCases().then((cases) => {
+      const withReport = cases.find((c) => c.report_id);
+      if (withReport?.report_id) setReportId(withReport.report_id);
+    }).catch(() => {});
+  }, [propReportId]);
 
   useEffect(() => {
     if (!reportId) return;
-    getSAR(reportId).then(setReport);
+    getSAR(reportId).then(setReport).catch(() => {});
   }, [reportId]);
 
   const handleVerify = async () => {
     if (!reportId) return;
     setVerifying(true);
-    setVerifyError(false);
     setVerifyResult(null);
-    const result = await verifySAR(reportId);
-    if (result.verified) {
+    try {
+      const result = await verifySAR(reportId);
       setVerifyResult(result);
-    } else {
-      setVerifyError(true);
+    } finally {
+      setVerifying(false);
     }
-    setVerifying(false);
   };
 
-  const verificationData = {
-    transactionHash: report?.blockchain_hash ?? "0x8a3f7c2b9e1d4a6fbc472e1a8d5f3c9e2b7a4d6f1c8e5a3b9f2d7c4e6a1b8c3d",
-    blockNumber:     verifyResult?.block_number  ?? "#18,429,847",
-    timestamp:       verifyResult?.timestamp     ?? "2026-02-17 10:15:42 UTC",
-    network:         verifyResult?.network       ?? "Ethereum Mainnet",
-    gasUsed:         "84,523",
-    status:          "Verified",
-    confirmations:   verifyResult ? String(verifyResult.confirmations) : "1,247",
+  const handleTamperDemo = async () => {
+    if (!reportId) return;
+    setTampering(true);
+    setVerifyResult(null);
+    try {
+      const result = await tamperDemo(reportId);
+      setTamperMessage(result.message);
+      // Refresh report
+      const updated = await getSAR(reportId);
+      setReport(updated);
+    } finally {
+      setTampering(false);
+    }
   };
+
+  const handleRestore = async () => {
+    if (!reportId) return;
+    setRestoring(true);
+    setTamperMessage(null);
+    setVerifyResult(null);
+    try {
+      await restoreReport(reportId);
+      const updated = await getSAR(reportId);
+      setReport(updated);
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const hashDisplay = report?.blockchain_hash
+    ?? "0x8a3f7c2b9e1d4a6fbc472e1a8d5f3c9e2b7a4d6f1c8e5a3b9f2d7c4e6a1b8c3d";
 
   const linkedDocuments = [
     {
       id: report?.case_id ?? "SAR-2026-00421",
       type: "SAR Report",
-      hash: report?.blockchain_hash ?? "0x4f8c3a2e9d1b7f5a6c3e8d2b9a1f7c4e5d8b3a6f2c9e1d7b4a8c5f3e2d9b6a1c",
-      timestamp: report?.last_modified ?? "2026-02-17 10:15:42",
-      status: "Anchored"
+      hash: report?.blockchain_hash ?? "pending-anchor",
+      timestamp: report?.last_modified ?? "—",
+      status: report?.blockchain_hash ? "Anchored" : "Pending",
     },
-    {
-      id: "TXN-88421",
-      type: "Transaction Record",
-      hash: "0x9b2d6f1c8e5a3b9f2d7c4e6a1b8c3d4f8c3a2e9d1b7f5a6c3e8d2b9a1f7c4e5",
-      timestamp: "2026-02-17 09:23:18",
-      status: "Anchored"
-    },
-    {
-      id: "TXN-88465",
-      type: "Transaction Record",
-      hash: "0x2e9d1b7f5a6c3e8d2b9a1f7c4e5d8b3a6f2c9e1d7b4a8c5f3e2d9b6a1c4f8c3",
-      timestamp: "2026-02-17 09:23:20",
-      status: "Anchored"
-    },
-    {
-      id: "AUDIT-00421",
-      type: "Audit Trail",
-      hash: "0x7f5a6c3e8d2b9a1f7c4e5d8b3a6f2c9e1d7b4a8c5f3e2d9b6a1c4f8c3a2e9d1b",
-      timestamp: "2026-02-17 10:15:45",
-      status: "Anchored"
-    }
   ];
 
   return (
@@ -80,7 +94,7 @@ export function BlockchainScreen({ reportId }: BlockchainScreenProps) {
           Blockchain Verification
         </h1>
         <p className="text-[#9CA3AF]" style={{ fontSize: '13px' }}>
-          Immutable proof and cryptographic verification for case {report?.case_id ?? "SAR-2026-00421"}
+          Immutable proof and cryptographic verification for case {report?.case_id ?? (reportId ?? "SAR-2026-00421")}
         </p>
       </div>
 
@@ -99,86 +113,133 @@ export function BlockchainScreen({ reportId }: BlockchainScreenProps) {
           </div>
           <div>
             <div className="text-white mb-1" style={{ fontSize: '18px', fontWeight: 500 }}>
-              Blockchain Anchored
+              {report?.blockchain_hash ? "Blockchain Anchored" : "Pending Anchor"}
             </div>
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" style={{ color: '#10B981' }} strokeWidth={1.5} />
-              <span className="text-[#10B981]" style={{ fontSize: '13px', fontWeight: 500 }}>
-                Verified on {verificationData.network}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Verification Details Grid */}
-        <div className="grid grid-cols-2 gap-6">
-          <div>
-            <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>Transaction Hash</div>
-            <div className="flex items-center gap-2">
-              <div
-                className="flex-1 px-3 py-2 font-mono text-white overflow-x-auto"
-                style={{ backgroundColor: '#0B1F3A', fontSize: '11px', borderRadius: '2px' }}
-              >
-                {verificationData.transactionHash}
+            {report?.blockchain_hash && (
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" style={{ color: '#10B981' }} strokeWidth={1.5} />
+                <span className="text-[#10B981]" style={{ fontSize: '13px', fontWeight: 500 }}>
+                  SHA-256 hash stored on mock blockchain
+                </span>
               </div>
-              <button className="p-2 hover:bg-[#0B1F3A] transition-colors" style={{ borderRadius: '2px' }}>
-                <ExternalLink className="w-4 h-4 text-[#9CA3AF]" strokeWidth={1.5} />
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>Block Number</div>
-            <div className="text-white" style={{ fontSize: '14px', fontWeight: 500 }}>{verificationData.blockNumber}</div>
-          </div>
-
-          <div>
-            <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>Timestamp</div>
-            <div className="text-white" style={{ fontSize: '14px', fontWeight: 500 }}>{verificationData.timestamp}</div>
-          </div>
-
-          <div>
-            <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>Network</div>
-            <div className="text-white" style={{ fontSize: '14px', fontWeight: 500 }}>{verificationData.network}</div>
-          </div>
-
-          <div>
-            <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>Gas Used</div>
-            <div className="text-white" style={{ fontSize: '14px', fontWeight: 500 }}>{verificationData.gasUsed}</div>
-          </div>
-
-          <div>
-            <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>Confirmations</div>
-            <div className="text-white" style={{ fontSize: '14px', fontWeight: 500 }}>{verificationData.confirmations}</div>
+            )}
           </div>
         </div>
 
-        {/* Verify button */}
-        <div className="mt-6 flex items-center gap-3">
+        {/* Hash display */}
+        <div className="mb-6">
+          <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>
+            Document Hash (SHA-256)
+          </div>
+          <div className="flex items-center gap-2">
+            <div
+              className="flex-1 px-3 py-2 font-mono text-white overflow-x-auto"
+              style={{ backgroundColor: '#0B1F3A', fontSize: '11px', borderRadius: '2px' }}
+            >
+              {hashDisplay}
+            </div>
+            <button className="p-2 hover:bg-[#0B1F3A] transition-colors" style={{ borderRadius: '2px' }}>
+              <ExternalLink className="w-4 h-4 text-[#9CA3AF]" strokeWidth={1.5} />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-6 mb-6">
+          <div>
+            <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>Blockchain TXN ID</div>
+            <div className="text-white font-mono" style={{ fontSize: '12px', fontWeight: 500 }}>
+              {report?.blockchain_txn ?? "—"}
+            </div>
+          </div>
+          <div>
+            <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>Anchored At</div>
+            <div className="text-white" style={{ fontSize: '14px', fontWeight: 500 }}>
+              {report?.last_modified ?? "—"}
+            </div>
+          </div>
+          <div>
+            <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>Mode</div>
+            <div className="text-white" style={{ fontSize: '14px', fontWeight: 500 }}>Mock Blockchain</div>
+          </div>
+          <div>
+            <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '12px', fontWeight: 500 }}>Algorithm</div>
+            <div className="text-white" style={{ fontSize: '14px', fontWeight: 500 }}>SHA-256</div>
+          </div>
+        </div>
+
+        {/* Verify button + result */}
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={handleVerify}
             disabled={verifying || !reportId}
             className="px-4 py-2 text-white hover:opacity-90 transition-opacity disabled:opacity-50"
             style={{ backgroundColor: '#1F4ED8', fontSize: '13px', fontWeight: 500, borderRadius: '2px' }}
           >
-            {verifying ? "Verifying…" : "Verify on Chain"}
+            {verifying ? "Verifying…" : "Verify Integrity"}
           </button>
-          {verifyResult && (
+          {verifyResult && verifyResult.integrity_valid && (
             <div className="flex items-center gap-2 text-[#10B981]" style={{ fontSize: '12px' }}>
               <CheckCircle2 className="w-4 h-4" strokeWidth={1.5} />
-              <span>Verification confirmed — hash integrity intact</span>
+              <span>✓ Document integrity confirmed. Hash matches blockchain record.</span>
             </div>
           )}
-          {verifyError && (
+          {verifyResult && !verifyResult.integrity_valid && (
             <div className="flex items-center gap-2 text-[#DC2626]" style={{ fontSize: '12px' }}>
               <XCircle className="w-4 h-4" strokeWidth={1.5} />
-              <span>Verification failed — hash mismatch detected</span>
+              <span>✗ INTEGRITY VIOLATION — document was altered after approval.</span>
             </div>
           )}
         </div>
       </div>
 
-      {/* Linked Documents */}
+      {/* Tamper Demo Section */}
+      <div className="border p-6 mb-4" style={{
+        backgroundColor: '#102A43',
+        borderColor: '#F59E0B',
+        borderRadius: '2px'
+      }}>
+        <div className="flex items-center gap-2 mb-3">
+          <AlertTriangle className="w-5 h-5" style={{ color: '#F59E0B' }} strokeWidth={1.5} />
+          <div className="text-white" style={{ fontSize: '14px', fontWeight: 500 }}>
+            Tamper Detection Demo
+          </div>
+        </div>
+        <p className="text-[#9CA3AF] mb-4" style={{ fontSize: '12px' }}>
+          Demonstrates how the system detects document tampering. Click "Tamper Document" to
+          modify the stored content without updating the blockchain hash, then click "Verify Integrity"
+          above to see the violation detected.
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={handleTamperDemo}
+            disabled={tampering || !reportId}
+            className="px-4 py-2 text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+            style={{ backgroundColor: '#F59E0B', fontSize: '13px', fontWeight: 500, borderRadius: '2px' }}
+          >
+            {tampering ? "Tampering…" : "Tamper Document"}
+          </button>
+          <button
+            onClick={handleRestore}
+            disabled={restoring || !reportId}
+            className="px-4 py-2 text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+            style={{ backgroundColor: '#10B981', fontSize: '13px', fontWeight: 500, borderRadius: '2px' }}
+          >
+            {restoring ? "Restoring…" : "Restore Document"}
+          </button>
+        </div>
+        {tamperMessage && (
+          <div className="mt-3 px-3 py-2 border border-[#F59E0B]" style={{
+            backgroundColor: '#F59E0B20',
+            borderRadius: '2px',
+            fontSize: '12px',
+            color: '#F59E0B'
+          }}>
+            {tamperMessage}
+          </div>
+        )}
+      </div>
+
+      {/* Anchored Documents */}
       <div className="border" style={{
         backgroundColor: '#102A43',
         borderColor: '#1F3A5F',
@@ -187,7 +248,7 @@ export function BlockchainScreen({ reportId }: BlockchainScreenProps) {
         <div className="px-4 py-3 border-b" style={{ borderColor: '#1F3A5F' }}>
           <h2 className="text-white" style={{ fontSize: '16px', fontWeight: 500 }}>Anchored Documents</h2>
           <p className="text-[#9CA3AF] mt-1" style={{ fontSize: '12px' }}>
-            All documents cryptographically linked to this case
+            Documents cryptographically anchored for this case
           </p>
         </div>
 
@@ -212,7 +273,9 @@ export function BlockchainScreen({ reportId }: BlockchainScreenProps) {
                   <td className="px-4 py-3 text-white" style={{ fontSize: '13px', fontWeight: 500 }}>{doc.id}</td>
                   <td className="px-4 py-3 text-[#E5E7EB]" style={{ fontSize: '13px' }}>{doc.type}</td>
                   <td className="px-4 py-3 text-[#9CA3AF] font-mono" style={{ fontSize: '11px' }}>
-                    {doc.hash.substring(0, 20)}...{doc.hash.substring(doc.hash.length - 8)}
+                    {doc.hash.length > 28
+                      ? `${doc.hash.substring(0, 20)}...${doc.hash.substring(doc.hash.length - 8)}`
+                      : doc.hash}
                   </td>
                   <td className="px-4 py-3 text-[#9CA3AF]" style={{ fontSize: '12px' }}>{doc.timestamp}</td>
                   <td className="px-4 py-3" style={{ fontSize: '12px' }}>
